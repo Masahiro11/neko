@@ -35,6 +35,7 @@ void MainScene::onEnter()
     this->setupTouchHandling();
     triggerTitle();
     this->scheduleUpdate();
+    this->flyingPiecePosition = this->pieceNode->getPosition();
 }
 
 
@@ -120,9 +121,13 @@ bool MainScene::init()
     this->character = rootNode->getChildByName<Character*>("character");
     this->scoreLabel = rootNode->getChildByName<cocos2d::ui::Text*>("scoreLabel");
     
-    auto lifeBG = rootNode->getChildByName("lifeBG");
+    this->lifeBG= rootNode->getChildByName<Sprite*>("lifeBG");
     this->timeBar = lifeBG->getChildByName<Sprite*>("lifeBar");
-    
+    this->timeBar->setZOrder(100);
+    this->lifeBG->setZOrder(100);
+    this->lifeBG->setVisible(true);
+    this->timeBar->setVisible(true);
+
     
     for (int i = 0; i < 10; ++i)
     {
@@ -236,6 +241,8 @@ void MainScene::setupTouchHandling()
                 
                 this->stepTower();
                 
+                this->character->runChopAnimation();
+                
                 if (this->isGameOver())
                 {
                     this->triggerGameOver();
@@ -267,6 +274,7 @@ void MainScene::stepTower()
 {
     // 一番下のピースのリファレンスを取得する
     Piece* currentPiece = this->pieces.at(this->pieceIndex);
+    this->animateHitPiece(currentPiece->getObstacleSide());
     
     // 一番下のピースをタワーの一番上に移動させる
     currentPiece->setPosition(currentPiece->getPosition() + Vec2(0.0f, currentPiece->getSpriteHeight() / 2.0f * 10.0f));
@@ -280,7 +288,9 @@ void MainScene::stepTower()
     this->lastObstacleSide = currentPiece->getObstacleSide();
     
     // タワー全体が下降するようにpieceNodeを下に移動させる
-    this->pieceNode->setPosition(this->pieceNode->getPosition() + Vec2(0.0f, -1.0f * currentPiece->getSpriteHeight() / 2.0f));
+    //this->pieceNode->setPosition(this->pieceNode->getPosition() + Vec2(0.0f, -1.0f * currentPiece->getSpriteHeight() / 2.0f));
+    cocos2d::MoveBy* moveAction = cocos2d::MoveBy::create(0.15f, Vec2(0.0f, -1.0f * currentPiece->getSpriteHeight() / 2.0f));
+    this->pieceNode->runAction(moveAction);
     
     // 一番下のピースを参照するインデックスを変える
     this->pieceIndex = (this->pieceIndex + 1) % 10;
@@ -309,6 +319,20 @@ void MainScene::triggerGameOver()
 {
     this->gameState = GameState::GameOver;
     this->setTimeLeft(0);
+    
+    // 最上位のノードのリファレンスを取得する
+    auto scene = this->getChildByName("Scene");
+    
+    // 「mat」のスプライトのリファレンスを取得する
+    auto mat = scene->getChildByName("mat");// ゲームオーバーのスコアラベルのリファレンスを取得する
+    cocos2d::ui::Text* gameOverScoreLabel = mat->getChildByName<cocos2d::ui::Text*>("gameOverScoreLabel");// スコアラベルをユーザーのスコアに設定する
+    gameOverScoreLabel->setString(std::to_string(this->score));
+    
+    // ゲームオーバーのアニメーションを読み込み、起動する
+    cocostudio::timeline::ActionTimeline* gameOverTimeline = CSLoader::createTimeline("MainScene.csb");
+    this->stopAllActions();
+    this->runAction(gameOverTimeline);
+    gameOverTimeline->play("gameOver", false);
 }
 
 void MainScene::triggerTitle()
@@ -338,8 +362,8 @@ void MainScene::triggerPlaying()
     auto scene = this->getChildByName("Scene");
     
     // 左右のTAPのスプライトのリファレンスを取得
-    cocos2d::Sprite* tapLeft = scene->getChildByName<cocos2d::Sprite*>("tap_left_5");
-    cocos2d::Sprite* tapRight = scene->getChildByName<cocos2d::Sprite*>("tap_right_6");
+    cocos2d::Sprite* tapLeft = scene->getChildByName<cocos2d::Sprite*>("tap_left");
+    cocos2d::Sprite* tapRight = scene->getChildByName<cocos2d::Sprite*>("tap_right");
     
     // フェードアウトのアクションを2つ作成
     cocos2d::FadeOut* leftFade = cocos2d::FadeOut::create(0.35f);
@@ -348,6 +372,8 @@ void MainScene::triggerPlaying()
     // フェードアウトのアクションを実行
     tapLeft->runAction(leftFade);
     tapRight->runAction(rightFade);
+    
+    this->scoreLabel->setVisible(true);
 }
 
 void MainScene::triggerReady()
@@ -355,12 +381,17 @@ void MainScene::triggerReady()
     // 最上位のノードのリファレンスを取得
     auto scene = this->getChildByName("Scene");
     // 左右のTAPのスプライトのリファレンスを取得
-    cocos2d::Sprite* tapLeft = scene->getChildByName<cocos2d::Sprite*>("tap_left_5");
-    cocos2d::Sprite* tapRight = scene->getChildByName<cocos2d::Sprite*>("tap_right_6");
+    cocos2d::Sprite* tapLeft = scene->getChildByName<cocos2d::Sprite*>("tap_left");
+    cocos2d::Sprite* tapRight = scene->getChildByName<cocos2d::Sprite*>("tap_right");
     
     // スプライトが表示されるようにする
     tapLeft->setOpacity(255);
     tapRight->setOpacity(255);
+    
+    cocos2d::Sprite* title = scene->getChildByName<cocos2d::Sprite*>("title_1");
+    title->setOpacity(0);
+    this->lifeBG->setOpacity(255);
+    this->timeBar->setOpacity(255);
     
     this->gameState = GameState::Ready;
     cocostudio::timeline::ActionTimeline* readyTimeline = CSLoader::createTimeline("MainScene.csb");
@@ -413,7 +444,36 @@ void MainScene::update(float dt)
 }
 
 
-
+void MainScene::animateHitPiece(Side obstacleSide){
+    // CSLoaderから新しいピースを読み込む
+    Piece* flyingPiece = dynamic_cast<Piece*>(CSLoader::createNode("Piece.csb"));
+    
+    // 飛んでいくピースの障害物のサイドが実際のピースと同じになるようにする
+    flyingPiece->setObstacleSide(obstacleSide);
+    
+    // 位置を設定し、それをシーンに追加する
+    flyingPiece->setPosition(this->flyingPiecePosition);
+    this->addChild(flyingPiece);
+    
+    // ピースのアニメーションのタイムラインを読み込む
+    cocostudio::timeline::ActionTimeline* pieceTimeline = CSLoader::createTimeline("Piece.csb");
+    
+    // キャラクターがいるサイドを取得する
+    Side characterSide = this->character->getSide();
+    
+    // キャラクターが左側にいる場合はピースを右側に飛ばし、逆の場合も然り
+    std::string animationName = (characterSide == Side::Left) ? std::string("moveRight") : std::string("moveLeft");
+    
+    // タイムラインがアップデートを取得できるようにアクションを実行する
+    flyingPiece->runAction(pieceTimeline);
+    
+    // タイムラインにアニメーションを再生するよう伝える
+    pieceTimeline->play(animationName, false);
+    
+    pieceTimeline->setLastFrameCallFunc([this, &flyingPiece]() {
+        this->removeChild(flyingPiece);
+    });
+}
 
 
 

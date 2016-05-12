@@ -54,10 +54,13 @@ private:
     void setScore(int score);
     
     float timeLeft;
+    cocos2d::Sprite* lifeBG;
     cocos2d::Sprite* timeBar;
     void setTimeLeft(float timeLeft);
     void update(float dt) override;
     
+    cocos2d::Vec2 flyingPiecePosition;
+    void animateHitPiece(Side obstacleSide);
     
 protected:
     void onEnter() override;
